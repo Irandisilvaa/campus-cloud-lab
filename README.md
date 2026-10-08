@@ -1,114 +1,95 @@
 # Campus na Nuvem
 
-**Laboratório de Redes, DNS e Segurança de Aplicações · AWS Academy · 90 minutos**
+**Laboratório prático de Redes, DNS, Balanceamento e Segurança na AWS — AWS Academy**
 
-Um portal de eventos pronto para publicar em duas EC2 privadas, atrás de um Application Load Balancer. O aluno configura e observa a infraestrutura: não precisa desenvolver a aplicação nem instalar dependências nela.
+Portal de eventos fictícios implantado em **duas instâncias EC2 privadas**, por trás de um **Application Load Balancer público**, usando **CloudFormation**. O objetivo é estudar VPC, Security Groups, balanceamento, DNS privado e AWS WAF. Não é um portal de inscrições nem um projeto de produção.
 
-**Comece pelo [tutorial do aluno](docs/TUTORIAL-ALUNO.md). Professor: leia primeiro a [preparação da turma](docs/PROFESSOR.md).**
+## Comece aqui
 
-## O que está pronto
+**[Tutorial atualizado para alunos — do zero à limpeza](docs/TUTORIAL-ALUNO.md)**: passo a passo do console e do CloudShell para a trilha **sem domínio público**, incluindo AMI, duas AZs, parâmetros, criação das stacks, testes, falha/recuperação, DNS, WAF e resolução de erros.
 
-- Portal responsivo com agenda fictícia, identificação do servidor e consulta de DNS interno.
-- Seis templates CloudFormation, já gerados, cobrindo os sete serviços solicitados.
-- Tutorial do console AWS, desafios, evidências, limpeza e diagnóstico de problemas.
-- Roteiro para gravar um vídeo demonstrativo. Não inclui vídeo gravado.
-- Testes locais e gerador dos templates para manutenção do projeto.
+**[Preparação do professor](docs/PROFESSOR.md)** · **[Checklist de evidências](docs/EVIDENCIAS.md)** · **[Resultados do ensaio](docs/VALIDACAO.md)** · [Roteiro de vídeo](docs/ROTEIRO-VIDEO.md)
 
-## Condições para executar todos os serviços
+### O que foi comprovado no AWS Academy
 
-1. O laboratório precisa permitir VPC, EC2, ELBv2, Route 53, ACM, WAFv2 e CloudFormation, incluindo suas operações de criação, atualização e exclusão.
-2. Para HTTPS público, é obrigatório controlar um domínio/subdomínio real e poder publicar DNS de validação. **O Academy não fornece automaticamente um domínio para este projeto.**
-3. O professor prepara a delegação DNS e o certificado antes da aula de 90 minutos; os alunos inspecionam essa preparação e configuram o listener HTTPS na aula.
-4. Sem domínio ou com serviço negado pelo Academy, o laboratório completo ainda não está viabilizado. É possível executar a parte permitida, mas isso não equivale a usar os sete serviços.
+Em **08/10/2026**, durante uma execução acompanhada com resultados de CloudShell fornecidos pelo operador, foram observados:
 
-**Status:** código e templates com validação local documentada em [VALIDACAO.md](docs/VALIDACAO.md). A implantação no AWS Academy da turma precisa ser ensaiada pelo professor. Não foi executada nesta entrega.
+- Pilha base criada; `/health` retornou `ok`; `/api/eventos` retornou três eventos.
+- Aplicação respondeu como **Servidor A** e **Servidor B**; os dois targets ficaram `healthy`.
+- Após interromper **B**, **A** continuou atendendo, embora tenha ocorrido **uma resposta HTTP 504 durante a transição**; B voltou depois ao estado `healthy`.
+- Zona DNS privada criada: `app.campus.internal` resolveu para os dois endereços privados das EC2.
+- AWS WAF foi criado em `Count` e atualizado para `Block`: `/admin` passou de HTTP **200** para **403** após propagação; `/` continuou HTTP **200**.
+- As duas EC2 apareceram `running`, com **IP privado e sem IPv4 público**.
 
-## Baixar
+**Limites do ensaio:** a inspeção final de **rotas VPC e regras de Security Groups** está prevista no tutorial, mas não foi comprovada pelos resultados enviados; **DNS público, ACM e HTTPS não foram executados** porque não havia domínio controlado. Isso não equivale a validação do percurso completo em todas as contas AWS Academy. Consulte os detalhes em [VALIDACAO.md](docs/VALIDACAO.md).
 
-Na primeira vez, use **git clone** (substitua a URL pelo repositório publicado pelo professor):
+## Arquitetura da trilha principal
+
+```mermaid
+flowchart TD
+  U["Navegador / CloudShell"] -->|"HTTP :80"| L["ALB público em 2 subnets públicas"]
+  W["AWS WAF · Count ou Block /admin"] -. "Associado ao ALB" .-> L
+  L -->|"HTTP :8080 via Security Group"| A["EC2 A · subnet privada A"]
+  L -->|"HTTP :8080 via Security Group"| B["EC2 B · subnet privada B"]
+  A -->|"Consulta DNS interna"| P["Route 53 · app.campus.internal"]
+  B -->|"Consulta DNS interna"| P
+  C["CloudFormation"] -. "Cria infraestrutura" .-> L
+```
+
+**Rede definida nos templates:** VPC `10.0.0.0/16`; públicas `10.0.1.0/24` e `10.0.2.0/24` com Internet Gateway; privadas `10.0.11.0/24` e `10.0.12.0/24` sem rota padrão para internet. Os IPs de EC2 são **dinâmicos** e precisam ser obtidos dos Outputs de cada grupo, nunca copiados do ensaio.
+
+## Arquivos do projeto
+
+| Arquivo | Papel |
+|---|---|
+| `app/` | HTML, CSS, JavaScript e servidor Python sem dependências externas |
+| `infra/01-base.yaml` | VPC, subnets, IGW, tabelas de rotas, Security Groups, duas EC2 e ALB HTTP |
+| `infra/02-dns-privado.yaml` | Zona Route 53 privada e registro A para as EC2 |
+| `infra/06-waf.yaml` | Web ACL, regra `AdminDemo` Count/Block e associação ao ALB |
+| `infra/03-dns-publico.yaml`, `04-certificado.yaml`, `05-https.yaml` | **Etapa opcional, não executada no ensaio:** somente com domínio público controlado, permissões e certificado válido |
+| `docs/TUTORIAL-ALUNO.md` | Roteiro reproduzível completo |
+| `docs/EVIDENCIAS.md` | Modelo de avaliação e documentação |
+| `docs/PROFESSOR.md` | Pré-aula, restrições, cronograma e custo |
+| `docs/VALIDACAO.md` | O que foi observado na AWS e o que ainda falta testar |
+| `scripts/` e `tests/` | Gerador de templates, smoke test e validações locais |
+
+## Para obter os arquivos
 
 ```bash
-git clone URL_DO_REPOSITORIO campus-cloud-lab
+git clone https://github.com/Irandisilvaa/campus-cloud-lab.git
 cd campus-cloud-lab
 ```
 
-Em cópia já existente, sem alterações locais pendentes:
+Em uma cópia existente (sem alterações pendentes):
 
 ```bash
 git pull --ff-only
 ```
 
-A alternativa é baixar e extrair o ZIP. Os arquivos em `infra/` já estão prontos para upload no CloudFormation. Nenhum comando de build é necessário para o aluno.
+Alternativamente, use **Code → Download ZIP** no GitHub. O aluno não precisa executar geradores: os seis templates em `infra/` já estão incluídos. Pelo CloudShell, o tutorial também ensina a baixar apenas o YAML necessário via `curl`.
 
-## Mapa dos serviços
+## O que ensinar antes da prática
 
-| Serviço | Implementação e atividade |
-|---|---|
-| Amazon VPC | `01-base.yaml`: CIDR /16, quatro subnets /24, duas AZs, tabelas pública/privada, IGW e rota padrão pública. |
-| Security Groups | `01-base.yaml`: entrada HTTP no ALB, saída apenas à aplicação, EC2 recebe 8080 somente do SG do ALB; sem SSH. Porta 443 adicionada pela stack HTTPS. |
-| ALB | `01-base.yaml`: listener HTTP, target group, duas instâncias, health check `/health`; `05-https.yaml`: listener HTTPS. |
-| Route 53 | `02-dns-privado.yaml`: zona associada à VPC e registro A para IPs privados; `03-dns-publico.yaml`: zona pública delegada; `05-https.yaml`: A Alias para ALB. |
-| ACM | `04-certificado.yaml`: certificado público com validação DNS na zona pública da mesma conta. |
-| WAF | `06-waf.yaml`: Web ACL regional, regra por URI, Count/Block e associação ao ALB. |
-| CloudFormation | Os seis templates provisionam e removem os recursos; aluno examina parâmetros, recursos, eventos e outputs. |
+- **EC2** executa a aplicação; **VPC** isola e organiza a rede; **subnets/route tables/IGW** definem caminhos.
+- **Security Groups** autorizam conexões por porta/origem; **ALB** distribui requisições entre EC2 e verifica a saúde de `/health`.
+- **Route 53 privado** resolve um nome dentro da VPC, e **WAF** inspeciona o caminho HTTP `/admin` para demonstrar Count e Block.
+- **CloudFormation** descreve e provisiona a infraestrutura como código (IaC), mas precisa das mesmas permissões do ambiente.
+- **ACM/HTTPS** exigem controle de domínio público para esta implementação; não são parte obrigatória da trilha validada sem domínio.
 
-## Arquitetura
+Não há Auto Scaling, SSH, NAT ou criptografia entre ALB e EC2. O WAF demonstrado não fornece proteção completa de produção.
 
-```mermaid
-flowchart TD
-  U["Navegador"] -->|"Consulta DNS público"| D["Route 53: A Alias"]
-  D -. "Endereço do ALB" .-> U
-  U -->|"HTTP ou HTTPS"| L["ALB · subnets públicas A e B"]
-  W["WAF regional"] -. "Web ACL associada" .-> L
-  C["Certificado ACM"] -. "Listener 443" .-> L
-  L -->|"SG do ALB → porta 8080"| A["EC2 A · subnet privada A"]
-  L -->|"SG do ALB → porta 8080"| B["EC2 B · subnet privada B"]
-  A -->|"Consulta interna"| P["Route 53 privado"]
-  B -->|"Consulta interna"| P
-```
-
-DNS fornece a resolução do nome; não transporta as requisições HTTP. WAF inspeciona requisições no ALB; não é uma máquina adicional no caminho. HTTPS termina no ALB; ALB → EC2 usa HTTP dentro da VPC, protegido por SG. Este laboratório não implementa criptografia de ponta a ponta.
-
-## Executar localmente (opcional)
-
-Python 3.9 ou superior, sem `pip install` para executar a aplicação:
-
-```bash
-python3 app/server.py
-```
-
-Abra `http://127.0.0.1:8080`. Encerre com Ctrl+C. A consulta `app.campus.internal` deve falhar fora da VPC: é esperado.
-
-## Estrutura
-
-```text
-app/                     Portal e servidor Python sem dependências externas
-infra/01-base.yaml        VPC + SG + EC2 + ALB
-infra/02-dns-privado.yaml  DNS interno
-infra/03-dns-publico.yaml Zona pública delegada
-infra/04-certificado.yaml Certificado ACM
-infra/05-https.yaml       Listener TLS e A Alias
-infra/06-waf.yaml         Web ACL e regra Count/Block
-scripts/                 Geração dos templates e teste HTTP remoto
-tests/                   Verificação local da aplicação e infraestrutura
-docs/                    Tutorial, preparação, vídeo, fontes e validação
-```
-
-## Manutenção pelo professor
-
-Edite `app/` ou `scripts/build_templates.py`, depois gere os templates. Os alunos não precisam fazer isso.
+## Manutenção e testes locais
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
 python3 scripts/build_templates.py
 python3 -m unittest discover -s tests -v
 cfn-lint infra/*.yaml
+node --check app/app.js
 ```
 
-O gerador embute arquivos em um pacote Base64 no UserData das EC2; não baixa código em execução. A base utiliza Amazon Linux 2023 **standard x86_64**, que inclui Python 3. Se mudar o UserData de uma instância existente, não presuma que cloud-init rodará novamente: para este laboratório, recrie a stack base e as extensões dependentes.
+**Atenção:** regenerar `01-base.yaml` altera o UserData embutido; um `git pull` no CloudShell não atualiza instâncias já criadas. Em laboratório, faça uma nova implantação controlada. Não coloque chaves AWS no repositório.
 
-## Limites e custos
+## Custos e limpeza
 
-Aplicação didática de leitura, sem autenticação, inscrições, banco ou persistência. `/admin` é fictício. O servidor Python da biblioteca padrão não é indicado para produção. Não há Auto Scaling, NAT Gateway, bastion, criação de IAM role, uso de credenciais na aplicação ou acesso SSH.
-
-EC2, EBS, ALB, IPv4 público do ALB, hosted zones e WAF podem consumir os créditos. Desligar EC2 não apaga ALB, WAF, volumes ou zonas. Excluir as stacks ao final é parte obrigatória do exercício. Consulte [preparação e custos](docs/PROFESSOR.md).
+EC2, EBS, ALB, IPv4 do balanceador, Route 53 e WAF podem consumir créditos. Use **somente os recursos permitidos na conta do seu grupo**. Exclua, nessa ordem, as stacks **WAF → DNS privado → Base** quando não tiver HTTPS público. O encerramento da sessão do Academy não garante exclusão de recursos. O tutorial inclui comandos de verificação e limpeza.

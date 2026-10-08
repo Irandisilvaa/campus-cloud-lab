@@ -1,191 +1,257 @@
-# Tutorial do aluno — Campus na Nuvem
+# Campus na Nuvem — tutorial reproduzível no AWS Academy (sem domínio)
 
-## Objetivo
+> **Trilha principal validada por execução acompanhada em 08/10/2026:** CloudFormation → VPC/EC2/ALB → falha e recuperação → Route 53 privado → WAF Count/Block → evidências → limpeza. O relato foi fornecido pelo operador do AWS Academy, não por acesso administrativo à conta. DNS público, ACM e HTTPS **não foram executados** por falta de domínio controlado. Os testes de rotas e Security Groups ainda exigem conferência com os comandos abaixo.
 
-Publicar o portal, identificar o caminho de uma requisição e testar isolamento, disponibilidade, DNS, HTTPS e bloqueio no WAF. A aplicação já está pronta. Use apenas dados fictícios.
+**Público:** alunos e professores de Redes, Computação em Nuvem e Segurança. **Tempo:** reserve pelo menos 90 minutos, com margem para a AWS provisionar/excluir recursos. **Custo:** o laboratório consome créditos; não deixe recursos ativos ao final. **Não há garantia de execução em toda conta Academy:** permissões, cotas e disponibilidade variam.
 
-**Antes de começar:** o professor deve confirmar as permissões e fornecer a região, a AMI Amazon Linux 2023 standard x86_64, duas zonas de disponibilidade e, para o percurso completo, uma zona pública delegada e um certificado ISSUED preparados na conta do seu grupo. Se esses itens não estiverem prontos, o tempo de 90 minutos não é garantido.
+## 0. O que construiremos
 
-## 1. Obter os arquivos e abrir a conta
+- Um portal de três eventos fictícios, com `/health`, `/api/eventos`, `/api/status`, `/api/dns` e `/admin` (fictício).
+- VPC `10.0.0.0/16`; duas sub-redes públicas (`10.0.1.0/24`, `10.0.2.0/24`) e duas privadas (`10.0.11.0/24`, `10.0.12.0/24`), em duas zonas de disponibilidade.
+- Duas EC2 Amazon Linux 2023 **standard x86_64** (`t3.micro`, quando permitido), sem IP público, servidor Python na porta 8080, iniciadas por UserData.
+- Um Application Load Balancer público na porta 80, com health check `/health`; Security Groups restringem a comunicação do ALB para as EC2.
+- Uma zona privada `campus.internal`, registro `app.campus.internal` para os IPs privados das EC2, e uma Web ACL WAF com `Count` → `Block` em `/admin`.
 
-1. Clone o repositório indicado pelo professor ou extraia o ZIP.
-2. Se já o clonou antes, execute `git pull --ff-only` na pasta. Não precisa programar ou executar o portal no computador para publicar na AWS.
-3. Inicie o laboratório no AWS Academy pelo controle disponível na turma e aguarde a sessão estar pronta.
-4. Abra o console AWS a partir do laboratório. Confira a região combinada com o professor em todas as telas regionais.
-5. Use um prefixo exclusivo para suas stacks, por exemplo `campus-g01`. Cada grupo deve usar sua conta de laboratório. Em conta compartilhada, uma única zona privada `campus.internal` por VPC e nomes de stack exclusivos são essenciais.
+**Não usamos:** domínio real, HTTPS, ACM, Auto Scaling, NAT Gateway, SSH, banco ou credenciais nas EC2. Não marque esses itens como executados.
 
-Não cadastre uma conta pessoal nem tente ampliar permissões IAM para contornar o Academy. Se houver AccessDenied, anote ação e recurso e chame o professor.
+## 1. Abrir a sessão e conferir pré-requisitos
 
-## 2. Criar a infraestrutura principal
+1. Entre no **AWS Academy / Learner Lab**, clique em **Start Lab** e espere o ambiente iniciar. Abra o console AWS pelo link do próprio laboratório.
+2. No canto superior direito, confirme a região do professor. No ensaio foi utilizada **US East (N. Virginia) `us-east-1`**.
+3. Abra **CloudShell**. Não crie usuário, política nem IAM Role. O CloudFormation deve executar com as permissões permitidas pela sessão do laboratório.
+4. Cada grupo deve trabalhar em sua **própria conta de laboratório**, sempre que possível. Em conta compartilhada, mantenha um `PREFIX` exclusivo por grupo e verifique cotas.
+5. Identifique uma AMI **Amazon Linux 2023 standard x86_64** para a região; não use AMI minimal/ARM. O comando abaixo usa o parâmetro público da AWS e pode falhar por restrição `ssm:GetParameter`; nesse caso o professor informa a AMI ou consulta a imagem pelo console EC2.
 
-No CloudFormation, abra **Stacks → Create stack → With new resources (standard)**. Os rótulos podem variar com o idioma do console. Escolha **Choose an existing template → Upload a template file** e envie `infra/01-base.yaml`.
-
-Use o nome `campus-g01-base` e preencha:
-
-| Parâmetro | Valor |
-|---|---|
-| `AmiId` | ID fornecido pelo professor: AL2023 standard x86_64, na região atual. Não use AMI minimal/ARM. |
-| `InstanceType` | `t3.micro` se permitido; use a alternativa validada pelo professor. |
-| `AvailabilityZoneA` | Primeira AZ, por exemplo us-east-1a se essa for a região escolhida. |
-| `AvailabilityZoneB` | Segunda AZ diferente, por exemplo us-east-1b. |
-| `AllowedWebCidr` | IP público da rede em formato `/32`, se estável; `0.0.0.0/0` torna o portal acessível publicamente. |
-| `HttpsHost` | Vazio nesta primeira etapa. |
-
-Não selecione uma nova IAM role de execução. O projeto não cria roles nem exige marcar capacidade de criação de IAM. Preserve as demais opções padrão, revise e crie a stack. A sessão precisa ter permissão para provisionar os recursos.
-
-Acompanhe **Events**, não apenas o status geral. Se falhar, encontre o primeiro evento CREATE_FAILED e consulte a seção de diagnóstico. **CREATE_COMPLETE não comprova que a aplicação iniciou**: ainda precisamos verificar os targets.
-
-Enquanto aguarda, abra o template e identifique `Vpc`, `InternetRoute`, `AlbSg`, `AppSg`, `Targets` e `HttpListener`.
-
-## 3. Verificar o portal e a rede
-
-1. Em **Outputs**, abra `HttpUrl` usando `http://` explicitamente. Antes do certificado, não use HTTPS no endereço padrão do ALB.
-2. Em **EC2 → Target Groups**, abra o target group cujo ARN aparece em `TargetGroupArn` e confira os dois targets em **healthy**. Aguarde a inicialização e os health checks.
-3. No portal, clique várias vezes em **Nova requisição**. Observe Servidor A/B; não é obrigatório alternar a cada clique.
-4. Em **VPC → Subnets/Route tables**, identifique:
-
-| Subnet | CIDR | AZ | Tabela de rotas |
-|---|---|---|---|
-| PublicA | 10.0.1.0/24 | A | Rota local + 0.0.0.0/0 para IGW |
-| PublicB | 10.0.2.0/24 | B | Rota local + 0.0.0.0/0 para IGW |
-| PrivateA | 10.0.11.0/24 | A | Apenas rota local da VPC |
-| PrivateB | 10.0.12.0/24 | B | Apenas rota local da VPC |
-
-A VPC usa `10.0.0.0/16`. Um `/24` tem 256 endereços totais; em subnets IPv4 usuais da AWS, cinco são reservados. A subnet é pública pela rota ao IGW, não pelo seu nome nem pelo campo de autoatribuição de IP. As subnets públicas hospedam o ALB; as EC2 privadas não têm IP público e não têm saída geral para a internet.
-
-5. Examine os Security Groups:
-
-| Grupo | Entrada | Saída |
-|---|---|---|
-| ALB | TCP 80 do CIDR configurado; 443 será adicionada na stack HTTPS | TCP 8080 para o SG da aplicação |
-| Aplicação | TCP 8080 apenas do SG do ALB | Sem permissão útil de iniciar conexões remotas; há uma regra TCP 1 para loopback que suprime o allow-all padrão |
-
-O retorno das conexões permitidas funciona porque o SG é **stateful**. O DNS do AmazonProvidedDNS é uma exceção: não é filtrado por Security Groups, por isso a consulta privada funciona mesmo sem regra de saída DNS. Não generalize isso para outros servidores DNS.
-
-6. Confira que as EC2 não possuem IP público nem regra SSH. O IP privado não é acessível diretamente do computador fora da VPC. Não tente “resolver” isso abrindo a porta 8080 ao mundo.
-
-## 4. Testar continuidade do serviço
-
-1. Faça capturas dos dois targets saudáveis e do portal.
-2. Encontre a EC2 indicada no output `ServerAId`. Selecione **Instance state → Stop instance**. Não escolha Terminate.
-3. Observe o estado no target group. A detecção não é instantânea; o target pode aparecer como unhealthy/unused conforme o estado da instância.
-4. Após o ALB retirar esse target do atendimento, faça novas requisições. O Servidor B deve continuar atendendo. Algumas requisições podem falhar durante a transição; não estamos prometendo zero perda.
-5. Inicie novamente a instância A e aguarde voltar a **healthy**.
-
-Não desligue as duas. Com todos os targets indisponíveis, o ALB não consegue garantir atendimento; o comportamento de fail-open também pode encaminhar a targets não saudáveis quando todos falham.
-
-## 5. Criar e testar DNS privado
-
-Crie `campus-g01-dns-privado` enviando `infra/02-dns-privado.yaml`.
-
-Copie os outputs da base para os parâmetros de mesmo nome: `VpcId`, `PrivateIpA` e `PrivateIpB`.
-
-Após CREATE_COMPLETE:
-
-1. Em Route 53 → Hosted zones, encontre `campus.internal`, tipo **Private**, e confira sua associação à VPC do laboratório.
-2. Abra o registro A `app.campus.internal`: os dois valores são IPs privados das EC2.
-3. No portal, clique **Consultar DNS privado**. A consulta é executada pelo servidor na VPC e deve retornar os IPs.
-4. Diferencie isso de consultar no notebook: a zona não está publicada no DNS público. Não há VPN ou Resolver inbound endpoint neste projeto.
-
-Esse registro não é um balanceador e não remove automaticamente um IP quando a EC2 para. O ALB é que usa health checks no fluxo público.
-
-## 6. Inspecionar o DNS público e o ACM
-
-**Etapa preparada pelo professor antes da aula**, ou feita por você em uma sessão prévia com tempo para propagação.
-
-### 6.1 Zona pública
-
-Envie `infra/03-dns-publico.yaml` para criar `campus-g01-dns-publico`. Em `DelegatedDomain`, informe o subdomínio real atribuído ao grupo, sem ponto final; por exemplo, `grupo01.lab.DOMINIO-DO-PROFESSOR`. Não copie esse exemplo literalmente.
-
-Copie `NameServers` e envie ao professor. Ele deve criar um registro **NS para o subdomínio delegado** no DNS autoritativo do domínio pai, com todos os servidores retornados. Não substitua os NS do domínio inteiro. Criar uma hosted zone sozinha não publica a delegação e não registra um domínio.
-
-Antes de continuar, o professor confirma que a delegação já resolve publicamente. Opcionalmente, use no seu computador:
+Cole este bloco uma única vez no CloudShell, trocando **somente** `campus-g01` pelo prefixo exclusivo do seu grupo:
 
 ```bash
-nslookup -type=NS SEU_SUBDOMINIO_REAL
+export AWS_PAGER=""                    # impede a tela de ajuda/paginação do less
+export AWS_DEFAULT_REGION="us-east-1"  # use a região definida pelo professor
+PREFIX="campus-g01"                    # exemplo: campus-g02, campus-g03...
+BASE="${PREFIX}-base"
+DNS="${PREFIX}-dns-privado"
+WAF="${PREFIX}-waf"
+
+aws sts get-caller-identity --query '{Account:Account,Arn:Arn}' --output table
+aws ec2 describe-availability-zones --filters Name=state,Values=available --query 'AvailabilityZones[].ZoneName' --output table
+
+AMI=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --query Parameter.Value --output text) || AMI=""
+echo "AMI oficial (se autorizada): ${AMI:-CONSULTE O PROFESSOR}"
 ```
 
-### 6.2 Certificado
-
-Crie `campus-g01-certificado` com `infra/04-certificado.yaml`. Preencha `PublicZoneId` e `PortalHostname` com os outputs da stack DNS público.
-
-CloudFormation pede o certificado e publica o CNAME de validação nessa zona Route 53. Em **ACM**, abra o certificado e confira nome, validação DNS e status **Issued**. A zona e o certificado devem estar na conta do grupo; o certificado deve estar na região do ALB.
-
-Se continuar em **Pending validation**, confira a delegação pública e o CNAME. A stack pode permanecer em CREATE_IN_PROGRESS enquanto aguarda. Uma zona privada não valida certificado público. Não use o hostname `*.elb.amazonaws.com` do ALB para pedir seu certificado: você não controla esse domínio.
-
-## 7. Habilitar HTTPS e o nome do portal
-
-Envie `infra/05-https.yaml` para criar `campus-g01-https`. Preencha:
-
-| Parâmetro | Fonte |
-|---|---|
-| `AlbArn`, `AlbDnsName`, `AlbHostedZoneId`, `AlbSecurityGroupId`, `TargetGroupArn` | Outputs da base |
-| `PublicZoneId`, `PortalHostname` | Outputs de DNS público |
-| `CertificateArn` | Output da stack certificado, já ISSUED |
-| `AllowedWebCidr` | Mesmo CIDR usado na base |
-
-**Não confunda `AlbHostedZoneId` (identificador canônico do ALB) com `PublicZoneId` (zona do seu domínio).**
-
-Após CREATE_COMPLETE, abra o output `HttpsUrl`. Verifique o certificado no navegador, o hostname e a indicação HTTPS no portal. No console, localize o listener 443 e o registro **A Alias** apontando ao ALB.
-
-Agora ative o redirecionamento: na stack **base**, escolha **Update → Use existing template** e altere somente `HttpsHost` para o `PortalHostname`. Preserve AMI, AZs e demais parâmetros. Revise as alterações e execute. Acesse novamente a URL HTTP: deve redirecionar para o hostname HTTPS válido.
-
-O certificado protege navegador → ALB. ALB → EC2 continua em HTTP 8080 neste exercício.
-
-## 8. Aplicar WAF: observar e bloquear
-
-1. Antes do WAF, abra `/admin` no seu portal. Deve retornar HTTP 200 e uma mensagem fictícia; não há painel administrativo real.
-2. Crie `campus-g01-waf` com `infra/06-waf.yaml`, passando `AlbArn` da base e `RuleMode=Count`.
-3. Em WAF, selecione a região correta. Abra a Web ACL e confirme a associação ao ALB e a regra `AdminDemo`.
-4. Acesse `/admin` algumas vezes. **Count** registra a correspondência, mas permite a requisição. Métricas/amostras podem levar alguns minutos para aparecer.
-5. Atualize a stack WAF, mantendo o template, com `RuleMode=Block`.
-6. Após a propagação da regra, abra `/admin`: deve retornar **403 Forbidden**. A página principal e `/health` devem continuar acessíveis.
-7. Registre evidências de antes/depois e da associação ao ALB.
-
-O filtro bloqueia URIs cujo caminho começa por `/admin`, após URL decode e lowercase; isso inclui `/admin123`. É intencional e didático. Não é um conjunto completo de proteção contra ataques e não substitui autenticação/autorização. Não faça testes contra sistemas externos.
-
-Opcional: com Python no computador, execute usando a URL HTTPS final (ou HTTP antes de habilitar HTTPS):
+Escolha **duas AZs distintas** da lista (o sufixo `1a` de uma conta não garante localização física idêntica à de outra). Exemplo para região `us-east-1`, **somente se ambas aparecerem disponíveis**:
 
 ```bash
-python3 scripts/check_portal.py https://SEU_HOSTNAME --admin-status 403
+AZ_A="us-east-1a"
+AZ_B="us-east-1b"
+# Se a consulta SSM falhou, substitua por uma AMI x86_64 standard validada pelo professor:
+# AMI="ami-xxxxxxxxxxxxxxxxx"
+test -n "$AMI" && test "$AZ_A" != "$AZ_B" || echo "ATENÇÃO: configure AMI e duas AZs distintas antes de criar."
 ```
 
-Antes de ativar Block, use `--admin-status 200`. O script verifica saúde, agenda, respostas dos servidores e status de `/admin`; não exige que ambos os servidores apareçam em poucas requisições.
+**Antes de continuar**, confirme `AMI` não vazia, duas AZs realmente disponíveis e a região correta. Não copie AMIs, IDs de VPC, de EC2 ou IPs de outros alunos.
 
-## 9. Entrega do grupo
+## 2. CloudFormation: criar a pilha base
 
-Preencha [EVIDENCIAS.md](EVIDENCIAS.md). Inclua capturas de: topologia/rotas, SGs, targets antes/depois da parada, DNS privado, A Alias público, certificado válido, WAF Count/Block e exclusão.
+### Caminho pelo console (o mesmo usado no ensaio)
 
-Explique: por que uma EC2 privada atende a usuários da internet através do ALB? Por que um registro DNS privado não habilita HTTPS público? Qual a diferença entre SG e WAF? O que o CloudFormation automatizou?
+Em **CloudFormation → Pilhas → Criar pilha → Com novos recursos (padrão)**, escolha **Carregar arquivo de modelo** `infra/01-base.yaml`, baixado de [infra/01-base.yaml](../infra/01-base.yaml). Na tela de parâmetros:
 
-## 10. Limpeza obrigatória
-
-Use apenas os recursos e stacks do seu grupo. Não remova zonas ou registros de terceiros.
-
-1. Se for manter a base temporariamente, atualize `HttpsHost` para vazio antes de excluir HTTPS. Se excluir tudo imediatamente, pode seguir a ordem abaixo.
-2. Exclua `campus-g01-waf`; aguarde a associação e a ACL desaparecerem.
-3. Exclua `campus-g01-https`; aguarde a remoção de listener, regra 443 e A Alias.
-4. Exclua `campus-g01-certificado` e aguarde.
-5. Na zona pública exclusiva do grupo, verifique se restou o CNAME de validação ACM (ele pode permanecer após a exclusão do certificado). Remova apenas esse CNAME e outros registros adicionados manualmente pelo seu grupo. Não tente apagar NS/SOA padrão.
-6. Peça ao professor para retirar a delegação NS do seu subdomínio no domínio pai antes de liberar a zona. Depois exclua `campus-g01-dns-publico`.
-7. Exclua `campus-g01-dns-privado` antes de excluir a VPC.
-8. Exclua `campus-g01-base`. Verifique DELETE_COMPLETE; ALB/interfaces podem levar vários minutos para desaparecer.
-9. Confira que não restaram EC2, EBS, ALB, Web ACL ou hosted zones do exercício. Se houver DELETE_FAILED, abra Events, corrija a dependência e tente novamente. Só então encerre a sessão do Academy.
-
-Se o professor manteve as stacks DNS/certificado para outra aula, siga a orientação dele e registre que esses recursos continuam ativos e podem gerar custo. Encerrar a sessão não equivale a excluir toda a infraestrutura.
-
-## Diagnóstico rápido
-
-| Sintoma | Verificar |
+| Campo | Valor |
 |---|---|
-| AccessDenied | Ação e recurso no evento; restrições do Academy. CloudFormation não ignora essas restrições. |
-| AMI inexistente ou arquitetura incompatível | AMI na região correta; AL2023 standard x86_64 e tipo permitido. |
-| ALB demora/targets unhealthy | AMI, inicialização, SG 8080, `/health`. Em EC2 → Monitor and troubleshoot → Get system log, procure `CAMPUS_BOOTSTRAP_OK` ou erro de Python/serviço. Pode haver atraso no log. |
-| CREATE_COMPLETE, mas portal não abre | Confira targets; base não utiliza cfn-signal nem garante prontidão da aplicação. Verifique CIDR de origem e listener. |
-| HTTP 503 | Ausência de targets disponíveis/registrados; confira EC2 e target group. |
-| HTTPS no DNS padrão do ALB dá erro | Use o hostname coberto pelo certificado; o domínio padrão do ALB não está nele. |
-| Certificado pendente | Delegação NS, CNAME público, zona correta e tempo de propagação. |
-| DNS privado falha | Stack 02, associação com VPC e DNS support/hostnames. Teste pelo botão do portal. |
-| WAF não bloqueia | Região, associação, RuleMode=Block e tempo de propagação. |
-| Zona pública não exclui | Remova CNAME ACM residual/registros manuais exclusivos do lab; preserve NS/SOA. |
-| Atualização da app não aparece | `git pull` só muda os arquivos locais. Gere o template atualizado e recrie o ambiente; UserData não é mecanismo contínuo de deploy. |
+| Nome | `${PREFIX}-base`, substituindo a variável pelo prefixo literal do grupo (por exemplo `campus-g01-base`) |
+| AmiId | AMI AL2023 standard x86_64 válida nesta região |
+| InstanceType | `t3.micro` (se autorizado) |
+| AvailabilityZoneA e B | Duas AZs diferentes e disponíveis |
+| AllowedWebCidr | `0.0.0.0/0` para a demonstração pública; restrinja ao IP `/32` da turma quando possível |
+| HttpsHost | **Vazio** |
+
+Em **Configurar opções**: etiquetas opcionais `Projeto=CampusNaNuvem`; **Perfil do IAM: em branco** (não clique em “Criar novo perfil”); modo expresso desabilitado; em caso de falha, reverter recursos; manter validações; sem política especial, SNS ou proteção contra encerramento. Revise e crie. Se a interface exigir um perfil, **não improvise uma role**: consulte o professor sobre as permissões/role já permitida pelo Learner Lab.
+
+### Caminho alternativo pelo CloudShell
+
+Os comandos abaixo são alternativa ao console, **não execute os dois métodos criando a mesma stack**. A criação começa a consumir créditos.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Irandisilvaa/campus-cloud-lab/main/infra/01-base.yaml -o /tmp/01-base.yaml
+: "${AMI:?Defina uma AMI AL2023 standard x86_64}"
+: "${AZ_A:?Defina a primeira AZ}"
+: "${AZ_B:?Defina a segunda AZ}"
+test "$AZ_A" != "$AZ_B" || { echo 'AZs devem ser diferentes'; exit 1; }
+
+aws cloudformation create-stack --stack-name "$BASE" \
+  --template-body file:///tmp/01-base.yaml \
+  --parameters \
+    ParameterKey=AmiId,ParameterValue="$AMI" \
+    ParameterKey=InstanceType,ParameterValue=t3.micro \
+    ParameterKey=AvailabilityZoneA,ParameterValue="$AZ_A" \
+    ParameterKey=AvailabilityZoneB,ParameterValue="$AZ_B" \
+    ParameterKey=AllowedWebCidr,ParameterValue=0.0.0.0/0 \
+    ParameterKey=HttpsHost,ParameterValue="" \
+  --tags Key=Projeto,Value=CampusNaNuvem
+aws cloudformation wait stack-create-complete --stack-name "$BASE"
+```
+
+No console, acompanhe **Eventos** até `CREATE_COMPLETE` (o estado inicial é `CREATE_IN_PROGRESS`). Se ocorrer `CREATE_FAILED`/rollback, copie **o primeiro recurso que falhou** e o motivo; pare antes das próximas pilhas. `CREATE_COMPLETE` não prova que o servidor Python está pronto.
+
+## 3. Teste do portal, API e balanceamento
+
+Para ambos os métodos de criação, abra CloudShell e carregue os Outputs da **sua própria** stack:
+
+```bash
+URL=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='HttpUrl'].OutputValue | [0]" --output text)
+TG=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='TargetGroupArn'].OutputValue | [0]" --output text)
+A=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='ServerAId'].OutputValue | [0]" --output text)
+B=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='ServerBId'].OutputValue | [0]" --output text)
+VPC=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue | [0]" --output text)
+ALB_ARN=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='AlbArn'].OutputValue | [0]" --output text)
+IP_A=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='PrivateIpA'].OutputValue | [0]" --output text)
+IP_B=$(aws cloudformation describe-stacks --stack-name "$BASE" --query "Stacks[0].Outputs[?OutputKey=='PrivateIpB'].OutputValue | [0]" --output text)
+echo "Portal HTTP: $URL"
+echo "EC2 A: $A / $IP_A | EC2 B: $B / $IP_B"
+```
+
+Abra o `HttpUrl` no navegador **com `http://`**. O portal deve exibir os três eventos e a área **A nuvem em funcionamento**. Depois rode:
+
+```bash
+curl -fsS "$URL/health"; echo
+curl -fsS "$URL/api/eventos" | python3 -m json.tool
+for i in {1..12}; do curl -fsS "$URL/api/status" | python3 -c 'import json,sys;print(json.load(sys.stdin)["server"])'; done
+aws elbv2 describe-target-health --target-group-arn "$TG" --query 'TargetHealthDescriptions[].{Instancia:Target.Id,Estado:TargetHealth.State}' --output table
+```
+
+**Esperado:** `/health` contém `"status":"ok"`; `/api/eventos` tem três eventos; A e B podem aparecer entre as chamadas (não precisa alternar a cada clique); target group mostra **2 `healthy`**. Se estiver `initial`, aguarde e consulte novamente. Se houver 503, procure os eventos, a AMI, a porta 8080 e os logs de sistema da instância.
+
+## 4. Comprovar rede e isolamento (sem alterar recursos)
+
+```bash
+aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC" --query 'Subnets[].{ID:SubnetId,CIDR:CidrBlock,Zona:AvailabilityZone,IPPublicoAutomatico:MapPublicIpOnLaunch}' --output table
+aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC" --query 'RouteTables[].{Tabela:RouteTableId,Subnets:Associations[].SubnetId,Rotas:Routes[].{Destino:DestinationCidrBlock,Gateway:GatewayId}}' --output json
+aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC" --query 'SecurityGroups[].{Nome:GroupName,ID:GroupId,Entrada:IpPermissions,Saida:IpPermissionsEgress}' --output json
+aws ec2 describe-instances --instance-ids "$A" "$B" --query 'Reservations[].Instances[].{ID:InstanceId,Estado:State.Name,Privado:PrivateIpAddress,Publico:PublicIpAddress,Subnet:SubnetId}' --output table
+```
+
+**Verifique, não apenas execute:** quatro subnets `/24`; somente as públicas têm `0.0.0.0/0` para o Internet Gateway; as privadas só têm rota local; ALB recebe TCP 80 e envia TCP 8080 ao SG da aplicação; EC2 recebe TCP 8080 **somente** do SG do ALB; **sem SSH público**; ambas EC2 estão `running` e `Publico: None`. Desabilitamos `less` com `AWS_PAGER=""`: se você cair numa tela de ajuda, pressione `q` e confira essa variável.
+
+## 5. Testar falha e recuperação — com cuidado
+
+**Faça isto somente se ambos targets estão `healthy`.** O ensaio acompanhou a parada do **Servidor B**, que inicialmente gerou uma resposta 504 durante a transição e depois deixou o Servidor A atendendo. O erro transitório não representa “alta disponibilidade perfeita”.
+
+```bash
+# Interrompa APENAS B (não termine; não pare as duas)
+aws ec2 stop-instances --instance-ids "$B"
+aws ec2 wait instance-stopped --instance-ids "$B"
+aws elbv2 describe-target-health --target-group-arn "$TG" --query 'TargetHealthDescriptions[].{Instancia:Target.Id,Estado:TargetHealth.State}' --output table
+# Aguarde o alvo B estar unused/unhealthy; a detecção não é instantânea.
+for i in {1..10}; do curl -sS -o /dev/null -w 'HTTP %{http_code}\n' "$URL/api/status"; done
+```
+
+**Esperado depois da detecção:** a maioria/todas as chamadas respondem 200 pelo A; pode ocorrer erro 504 durante transição. Selecione `/api/status` para identificar o nome do servidor. **Recupere B antes de avançar:**
+
+```bash
+aws ec2 start-instances --instance-ids "$B"
+aws ec2 wait instance-running --instance-ids "$B"
+aws elbv2 describe-target-health --target-group-arn "$TG" --query 'TargetHealthDescriptions[].{Instancia:Target.Id,Estado:TargetHealth.State}' --output table
+# Se B estiver initial, espere alguns minutos e repita até haver 2 healthy.
+```
+
+O ALB redireciona tráfego para targets disponíveis; **não cria novas EC2** (não há Auto Scaling).
+
+## 6. Criar o Route 53 privado — sem domínio comprado
+
+Antes desta stack, `curl -s -o /dev/null -w '%{http_code}\n' "$URL/api/dns"` normalmente retorna **503**, pois o nome ainda não existe.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Irandisilvaa/campus-cloud-lab/main/infra/02-dns-privado.yaml -o /tmp/02-dns-privado.yaml
+aws cloudformation create-stack --stack-name "$DNS" \
+  --template-body file:///tmp/02-dns-privado.yaml \
+  --parameters \
+    ParameterKey=VpcId,ParameterValue="$VPC" \
+    ParameterKey=PrivateIpA,ParameterValue="$IP_A" \
+    ParameterKey=PrivateIpB,ParameterValue="$IP_B"
+aws cloudformation wait stack-create-complete --stack-name "$DNS"
+curl -fsS "$URL/api/dns" | python3 -m json.tool
+```
+
+**Esperado:** `name: app.campus.internal`, `addresses` contendo exatamente os IPs privados A/B da **sua** stack. Confira no console **Route 53 → Hosted zones → campus.internal (Private)**. A resolução é feita no servidor dentro da VPC, não no notebook do estudante. A zona privada **não** habilita HTTPS público.
+
+## 7. Criar AWS WAF, observar e bloquear
+
+O WAF pode ter **restrições e cobrança** próprias. Se não houver permissão WAFv2, registre o `AccessDenied` no relatório; não tente criar IAM Role/políticas nem trocar para uma conta pessoal.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Irandisilvaa/campus-cloud-lab/main/infra/06-waf.yaml -o /tmp/06-waf.yaml
+aws cloudformation create-stack --stack-name "$WAF" \
+  --template-body file:///tmp/06-waf.yaml \
+  --parameters ParameterKey=AlbArn,ParameterValue="$ALB_ARN" ParameterKey=RuleMode,ParameterValue=Count
+aws cloudformation wait stack-create-complete --stack-name "$WAF"
+curl -sS -o /dev/null -w 'Admin: HTTP %{http_code}\n' "$URL/admin"  # esperado 200
+```
+
+Agora atualize a **mesma** pilha (não crie outra) para `Block`:
+
+```bash
+aws cloudformation update-stack --stack-name "$WAF" --use-previous-template \
+  --parameters ParameterKey=AlbArn,UsePreviousValue=true ParameterKey=RuleMode,ParameterValue=Block
+aws cloudformation wait stack-update-complete --stack-name "$WAF"
+aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" \
+  --query 'WebACL.{Nome:Name,Regras:Rules[].{Nome:Name,Acao:Action}}' --output json
+```
+
+A regra `AdminDemo` deve mostrar `"Block": {}`. **Importante:** no ensaio, logo após `UPDATE_COMPLETE`, `/admin` ainda respondeu **200** por um período. Isso **não significa necessariamente falha**: aguarde a propagação e repita:
+
+```bash
+for i in {1..6}; do
+  echo "Tentativa $i"
+  curl -sS -o /dev/null -w 'Admin: HTTP %{http_code}\n' "$URL/admin"
+  curl -sS -o /dev/null -w 'Portal: HTTP %{http_code}\n' "$URL/"
+  sleep 20
+done
+```
+
+**Esperado:** `/admin` passa a **403**, mas `/` continua **200**. No console AWS WAF, confira a Web ACL regional associada ao ALB e sua regra `AdminDemo`. Uma proteção didática de URI **não substitui** autenticação ou políticas de segurança de produção.
+
+## 8. HTTPS e ACM: exercício **não executado sem domínio**
+
+**Pare aqui quanto a DNS público e certificado se não tiver controle de domínio/subdomínio real.** Não crie uma zona pública inventada nem peça certificado para `*.elb.amazonaws.com`: você não controla esses nomes. Registre **NÃO EXECUTADO — falta de domínio público para validar ACM/HTTPS**, e não “reprovado” ou “aprovado”. Os templates `03-dns-publico.yaml`, `04-certificado.yaml` e `05-https.yaml` permanecem no repositório como percurso avançado **condicional**, que exige professor com delegação de DNS e certificado ISSUED; não foi validado no ensaio relatado.
+
+## 9. Evidências e respostas
+
+Antes da limpeza, faça capturas do CloudFormation, portal, Target Group antes/durante/depois da parada, subnets/rotas, Security Groups, EC2 sem IP público, resposta `/api/dns` e WAF Count/Block. Preencha [EVIDENCIAS.md](EVIDENCIAS.md). Não publique credenciais, tokens ou logs completos da sessão. Explique por que EC2 privadas respondem via ALB; o que torna uma subnet pública; diferença entre SG/WAF; e por que DNS privado não fornece certificado HTTPS público.
+
+## 10. Limpeza obrigatória após registrar evidências
+
+**Exclua apenas stacks do seu prefixo.** Ordem do percurso sem domínio: **WAF → DNS privado → Base**. Antes, confira as três pilhas existentes. Se algum serviço foi negado e a stack não existe ou está em rollback, confira o status antes de tentar exclusão.
+
+```bash
+aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE ROLLBACK_COMPLETE --query "StackSummaries[?starts_with(StackName, '${PREFIX}')].[StackName,StackStatus]" --output table
+# Execute os comandos a seguir apenas para stacks que realmente existem e pertencem ao grupo:
+aws cloudformation delete-stack --stack-name "$WAF"
+aws cloudformation wait stack-delete-complete --stack-name "$WAF"
+aws cloudformation delete-stack --stack-name "$DNS"
+aws cloudformation wait stack-delete-complete --stack-name "$DNS"
+aws cloudformation delete-stack --stack-name "$BASE"
+aws cloudformation wait stack-delete-complete --stack-name "$BASE"
+```
+
+Confira na conta que ALB, EC2, volumes e zona privada **do seu grupo** foram realmente excluídos. `DELETE_FAILED` exige diagnóstico de dependências em Eventos; **encerrar o Learner Lab ou parar EC2 não limpa o resto**. Se você criou HTTPS público em outra versão, a ordem de limpeza é diferente: siga a documentação específica e remova recursos opcionais/delegações antes da VPC.
+
+## 11. Problemas mais comuns
+
+| Sintoma | Ação segura |
+|---|---|
+| `less`/tela de ajuda no terminal | Pressione `q`; `export AWS_PAGER=""` |
+| `AccessDenied` / quota | Registre operação negada e consulte professor; não altere IAM por conta própria |
+| AMI não aparece / arquitetura incompatível | Use AL2023 **standard x86_64** da mesma região; confirme instância permitida |
+| Stack `CREATE_COMPLETE`, portal sem resposta | Aguarde health checks, inspecione Target Group e log de boot (`CAMPUS_BOOTSTRAP_OK`) |
+| Target `initial` | Aguarde; não marque falha enquanto inicializa |
+| Um 504 no teste de parada | Pode ocorrer durante transição; só avalie após o ALB detectar o target parado |
+| `start-instances` retorna `running` mas ainda `initial` no ALB | Espere novos health checks até `healthy` |
+| `/api/dns` 503 | Ainda não criou a stack 02, zona privada incorreta ou VPC não associada |
+| `/admin` 200 logo após mudar para Block | Confirme Web ACL associada, `AdminDemo: Block`; aguarde propagação e tente novamente |
+| HTTPS indisponível | Sem domínio controlado, mantenha HTTP e documente limite; não peça ACM para o DNS padrão do ALB |
+| `DELETE_FAILED` | Verifique Eventos e dependências; não apague recursos de outros grupos |
+
+### Entrega final
+
+Envie **[EVIDENCIAS.md](EVIDENCIAS.md)** preenchido, capturas com resultados reais, explicações dos conceitos e comprovação de exclusão. A utilização de AWS Academy é sujeita às permissões/cotas de cada turma: **não prometa 100% de execução sem novo ensaio no ambiente da turma**.

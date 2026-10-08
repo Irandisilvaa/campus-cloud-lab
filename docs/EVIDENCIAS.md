@@ -1,48 +1,61 @@
-# Evidências do grupo
+# Evidências de laboratório — Campus na Nuvem (sem domínio)
 
-Grupo: ______  Integrantes: ______  Região: ______  Data: ______
+**Grupo:** __________  **Integrantes:** __________  **Data:** __________  **Região:** __________  **Prefixo das stacks:** __________
 
-Não inclua credenciais, tokens ou chaves nas capturas. Use somente dados fictícios.
+**Preenchimento:** use `APROVADO`, `FALHOU` ou `NÃO EXECUTADO` e descreva o que ocorreu. Capturas não devem conter credenciais, tokens, chaves ou dados pessoais. IDs de instâncias/contas são específicos da execução; não devem ser reutilizados por outro grupo.
 
-| Item | Evidência esperada | Resultado/arquivo |
-|---|---|---|
-| CloudFormation | Base CREATE_COMPLETE e lista de recursos | |
-| VPC | /16, quatro /24, rota pública ao IGW e privadas sem rota de internet | |
-| SG | 8080 aceita apenas SG do ALB; ausência de SSH | |
-| ALB | Dois targets healthy e portal funcionando | |
-| Falha | Uma EC2 parada; outra continua atendendo depois da detecção | |
-| Recuperação | Dois targets healthy novamente | |
-| DNS privado | Resolução de app.campus.internal pelo servidor | |
-| DNS público | Zona delegada e A Alias para ALB | |
-| ACM | ISSUED e certificado válido no hostname do navegador | |
-| HTTPS | HTTP redireciona para HTTPS no hostname correto | |
-| WAF | /admin 200 em Count e 403 em Block; / continua 200 | |
-| Limpeza | Stacks excluídas e nenhum recurso do grupo restante | |
+| Item | O que precisa ser comprovado | Situação | Captura / observação |
+|---|---|---|---|
+| CloudFormation | Stack base `CREATE_COMPLETE` | | |
+| Aplicação | `/health`: `ok`, `/api/eventos`: 3 eventos | | |
+| ALB | Dois targets `healthy`, respostas A e B | | |
+| VPC | Quatro subnets, dois AZs, CIDRs previstos | | |
+| Rotas | Pública ao IGW, privadas sem rota padrão | | |
+| Security Groups | ALB 80; EC2 só 8080 do ALB; SSH não aberto | | |
+| EC2 | Duas `running` sem IPv4 público | | |
+| Falha | Parar uma instância, observar outra atender; registrar falhas transitórias | | |
+| Recuperação | Ambas voltam a `healthy` | | |
+| DNS privado | `app.campus.internal` resolve IPs privados da própria stack | | |
+| WAF Count | `/admin` retorna HTTP 200 | | |
+| WAF Block | `/admin` 403, `/` 200 após propagação | | |
+| DNS público | Somente se domínio delegado e autorizado | NÃO EXECUTADO, se sem domínio | |
+| ACM e HTTPS | Somente com certificado ISSUED e domínio próprio | NÃO EXECUTADO, se sem domínio | |
+| Limpeza | WAF, DNS privado e base excluídos; recursos do grupo removidos | | |
 
-1. Por que as EC2 privadas conseguem responder a usuários públicos através do ALB?
+## Respostas conceituais
 
-Resposta: ______
+1. **Como EC2 sem IP público consegue responder ao navegador pela internet?**
 
-2. O que torna uma subnet pública? Qual o papel do IGW e da route table?
+   Resposta: ______________________________________________
 
-Resposta: ______
+2. **O que faz uma subnet ser pública? Qual a função da rota `0.0.0.0/0` e do Internet Gateway?**
 
-3. Como stateful explica as respostas das EC2 mesmo sem uma saída geral liberada?
+   Resposta: ______________________________________________
 
-Resposta: ______
+3. **Qual a diferença entre Security Group e regra de URI do WAF?**
 
-4. Por que private hosted zone não permite validar o certificado público deste portal?
+   Resposta: ______________________________________________
 
-Resposta: ______
+4. **Por que ocorreu (ou poderia ocorrer) erro 504 na parada de uma EC2? O ALB cria uma instância substituta?**
 
-5. Qual a diferença entre uma restrição do SG e uma regra de URI no WAF?
+   Resposta: ______________________________________________
 
-Resposta: ______
+5. **Por que o DNS privado não habilita HTTPS público? Onde ocorreria o término TLS se o certificado estivesse configurado?**
 
-6. Onde termina TLS? O ALB cria novas EC2 automaticamente?
+   Resposta: ______________________________________________
 
-Resposta: ______
+6. **Quais ações CloudFormation automatizou e quais dependem das permissões do Learner Lab?**
 
-7. Que serviço faltou executar por restrição do ambiente, se houve? Não marque como concluído algo apenas explicado.
+   Resposta: ______________________________________________
 
-Resposta: ______
+## Limitações e encerramento
+
+**Serviços indisponíveis ou não executados, com motivo:** ______________________________________________
+
+**Falhas encontradas e soluções/limites:** ______________________________________________
+
+**Horário de início e término:** ______________________________________________
+
+**Confirmação de exclusão das stacks e recursos do grupo:** ______________________________________________
+
+> Nunca marque como aprovado um recurso previsto nos templates mas não executado. Sem domínio público controlado, DNS público/ACM/HTTPS permanecem **NÃO EXECUTADOS**.

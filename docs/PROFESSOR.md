@@ -1,99 +1,65 @@
-# Preparação do professor
+# Guia do professor — Campus na Nuvem / AWS Academy
 
-## Decisão essencial
+## Situação confirmada do projeto
 
-O projeto contempla os sete serviços, mas a compatibilidade com o laboratório da turma ainda precisa ser comprovada. Não prometa executar o percurso completo apenas porque esses serviços aparecem na ementa. Academy pode restringir operações específicas, tipos EC2, regiões e cotas. Não há tentativa de contornar essas restrições neste projeto.
+Um **ensaio acompanhado em 08/10/2026**, com saídas de CloudShell fornecidas pelo operador, confirmou a trilha **sem domínio**: pilha base, portal/API, dois targets saudáveis, interrupção/recuperação de uma EC2, Route 53 privado e WAF Count → Block (após propagação). **Não** foram comprovados na mesma evidência os detalhes finais de route tables/SG nem a limpeza de todas as stacks. **DNS público, ACM e HTTPS não foram executados** por ausência de domínio público controlado. Ver [VALIDACAO.md](VALIDACAO.md).
 
-**Critério para liberar a aula completa:** um ensaio de criação, atualização, testes e exclusão dos seis templates na mesma modalidade de laboratório usada pelos alunos. Uma chamada de listagem ou `validate-template` não comprova permissão para criar recursos. Se Route 53, ACM ou WAF forem negados, solicite ao responsável pelo curso um ambiente autorizado compatível; não apresente uma simulação como uso real do serviço.
+A execução bem-sucedida em um Learner Lab **não garante** os mesmos resultados em todas as contas: quotas, AMIs, AZs e políticas do Academy podem mudar. Faça um ensaio **na mesma modalidade e região da turma** antes da aula. Consulte o [tutorial do aluno](TUTORIAL-ALUNO.md) para os comandos efetivamente utilizados.
 
-## Domínio e preparação anterior à aula
+## Preparação obrigatória da turma
 
-Para cada grupo executar o conjunto completo em sua própria conta:
+1. Confirme que os estudantes têm **AWS Academy Learner Lab** autorizado, região definida (ensaio: `us-east-1`) e créditos suficientes.
+2. Confira permissão para **CloudFormation, VPC/EC2, ELBv2, Route 53 private hosted zone e WAFv2 regional**; não crie policies/roles para contornar bloqueios da conta.
+3. Valide duas AZs distintas, tipo `t3.micro` (ou alternativa prevista no template), AMI **AL2023 standard x86_64**, e capacidade para duas EC2, dois volumes e um ALB por grupo.
+4. Peça um **prefixo exclusivo** (`campus-g01`, `campus-g02`...). As pilhas serão `<prefixo>-base`, `<prefixo>-dns-privado` e `<prefixo>-waf`.
+5. Preferencialmente **uma conta Learner Lab por grupo**; em conta compartilhada, analise quotas e conflitos antes de provisionar. Nunca compartilhe credenciais entre grupos.
+6. Baixe/teste os YAML em `infra/`. Em CloudShell, os alunos também podem obtê-los via `curl` dos links `raw.githubusercontent.com` do repositório.
+7. Prepare plano para `AccessDenied` e para alunos com conexão restrita: demonstração prévia e registro de serviço não executado; não prometa 100% de compatibilidade.
+8. Prepare capturas orientadas por [EVIDENCIAS.md](EVIDENCIAS.md) e tempo para limpeza da AWS.
 
-1. Providencie um domínio público sob controle do professor/instituição. Não é necessário comprar um domínio por aluno nem registrá-lo no Academy.
-2. Reserve um subdomínio exclusivo por grupo, por exemplo `grupo01.lab.seudominio.edu.br`.
-3. Em cada conta, crie a stack `03-dns-publico.yaml`. Anote os quatro NS e o PublicZoneId.
-4. No DNS autoritativo do pai, publique a delegação NS para o nome completo atribuído ao grupo. A zona pai precisa ser autoritativa: se `lab.seudominio.edu.br` não é uma zona separada, a delegação pode ser criada na zona `seudominio.edu.br` com o nome `grupo01.lab`.
-5. Confirme a resolução pública e só então crie a stack `04-certificado.yaml` naquela conta/região.
-6. Aguarde ACM ISSUED. Não deixe a emissão/propagação para a aula de 90 minutos.
-7. Entregue ao grupo o PortalHostname, PublicZoneId e CertificateArn. Eles não são senhas. O aluno irá inspecionar esses recursos e criar o listener HTTPS/A Alias na aula.
+## Execução sugerida
 
-O certificado precisa existir na conta e região do ALB de cada grupo; não reutilize diretamente um ARN de outra conta. Se nenhum domínio estiver disponível, a parte HTTP/DNS privado/WAF ainda é útil, mas o objetivo de HTTPS público com ACM não fica completo. ACM Private CA não é usado como atalho: acrescentaria serviço, custo e distribuição de confiança.
-
-Uma opção pedagógica é preparar DNS/ACM em uma sessão anterior de 15–30 minutos mais a espera pela propagação. A aula de 90 minutos passa a aproveitar esses recursos já válidos. Se todos precisarem criar tudo do zero durante a mesma sessão, amplie o tempo ou divida o laboratório em dois encontros.
-
-## Ensaio obrigatório
-
-- [ ] Modalidade do Academy e restrições identificadas; região definida.
-- [ ] Tipo EC2 permitido (duas instâncias por grupo) e duas AZs disponíveis.
-- [ ] AMI oficial AL2023 **standard x86_64** validada, com `/usr/bin/python3`, cloud-init, tar e systemd. Não use minimal ou imagem de container.
-- [ ] Criação da base e dois targets healthy. Cronometrar: ______.
-- [ ] Página abre e as duas instâncias respondem ao ALB.
-- [ ] Teste de parada/retorno de uma instância executado.
-- [ ] DNS privado retorna IPs de dentro da VPC.
-- [ ] Delegação pública e certificado ISSUED em cada conta.
-- [ ] HTTPS válido, A Alias correto e redirecionamento HTTP testado.
-- [ ] WAF Count → Block resulta em 200 → 403 para `/admin`.
-- [ ] Desativação da regra/exclusão limpa funciona.
-- [ ] Todas as stacks excluídas no ensaio; CNAME ACM residual tratado; delegação removida antes de liberar a zona.
-- [ ] Saldo/cotas suficientes. Guardar o tempo de exclusão: ______.
-
-O projeto não cria roles IAM e não usa instance profile. A sessão do CloudFormation continua precisando das permissões de EC2/VPC, ELBv2, Route 53, ACM, WAFv2 e CloudFormation. Mantenha as políticas do laboratório intactas.
-
-## Aula de 90 minutos
-
-DNS público e certificado já preparados. Alunos em duplas, idealmente um ambiente por dupla conforme regras da turma. Se cada aluno tiver conta própria, ele cria os recursos apenas na sua conta; não compartilhe credenciais.
-
-| Minutos | Atividade |
+| Intervalo aproximado | Atividade |
 |---|---|
-| 0–15 | Conceitos e caminho da requisição: VPC, SG, ALB, DNS, TLS, WAF e IaC. |
-| 15–25 | Abrir repositório, revisar template, preencher parâmetros e iniciar base. |
-| 25–35 | Enquanto provisiona, explicar CIDR/rotas, inbound/outbound e camadas. |
-| 35–45 | Portal, targets e inspeção de isolamento. |
-| 45–53 | Parar uma EC2, observar continuidade, reiniciar. |
-| 53–61 | Criar zona privada e testar DNS pelo portal. |
-| 61–72 | Inspecionar DNS/ACM preparados; criar HTTPS/A Alias e redirecionamento. |
-| 72–80 | WAF Count/Block, comparação 200/403 e evidências. |
-| 80–90 | Excluir extensões e base; acompanhar eventos e conferir recursos. |
+| 0–15 min | Teoria: VPC/CIDR, AZ/subnets/rotas, EC2, SG, ALB, DNS, WAF e IaC |
+| 15–30 min | Login, região/AMI/AZs, `01-base.yaml`, parâmetros e CloudFormation |
+| 30–45 min | Portal, `/health`, targets `healthy`, comandos de rede e isolamento |
+| 45–55 min | Parar **apenas uma** EC2 e recuperar; explicar HTTP 504 transitório |
+| 55–65 min | `02-dns-privado.yaml`: `/api/dns` de 503 para resolução interna |
+| 65–80 min | `06-waf.yaml`: Count/200 → Block/403 com espera pela propagação |
+| 80–90+ min | Capturas, questões, exclusão das 3 stacks e confirmação |
 
-Esse cronograma é uma meta a confirmar no ensaio: provisão/exclusão da AWS não tem prazo fixo. Inicie a limpeza mais cedo se a turma atrasar e mantenha acompanhamento após o horário se houver DELETE_IN_PROGRESS/DELETE_FAILED. Tenha um ambiente de demonstração previamente validado para explicar enquanto a turma aguarda; ele também deve ser removido.
+As esperas de provisionamento/exclusão e propagação podem ultrapassar esse tempo; o cronograma é **estimativa**, não garantia. Não deixe o encerramento para depois que os créditos acabarem.
 
-## Custos e uso temporário
+## Ponto de atenção: Console CloudFormation
 
-Há custos potenciais de duas EC2, dois volumes gp3, ALB (tempo + capacidade), endereços IPv4 públicos do ALB, duas hosted zones e WAF (Web ACL, regra e requisições). O certificado público não exportável integrado ao ALB segue a política de preços atual do ACM; confira a página oficial antes do ensaio. Não usamos Private CA, regras de Marketplace ou Bot Control.
+Na criação da stack base, deixe **Perfil do IAM** sem selecionar; **não clique em “Criar novo perfil”**. Preserve validações de implantação, sem modo expresso e sem proteção contra encerramento na pilha didática; o parâmetro `HttpsHost` permanece **vazio** na trilha sem domínio. `CREATE_COMPLETE` não basta: valide portal e targets. No CloudShell, use `export AWS_PAGER=""` para evitar o paginador `less` que confundiu a leitura de testes na execução acompanhada.
 
-Não estimamos o valor total sem região, duração real e quantidade de grupos. Preencha essa conta no AWS Pricing Calculator antes da aula. **Não suponha que toda cobrança é proporcional aos minutos de uso**: hosted zones possuem regras próprias de cobrança mensal. WAF tem componentes por tempo e por requisição. Créditos Academy não tornam recursos gratuitos.
+## Ponto de atenção: falha e WAF
 
-Use uma Web ACL com uma regra, ative somente durante o exercício e exclua depois. Não execute carga intensa. Desligar as EC2 ou encerrar a sessão do Academy não substitui a exclusão dos recursos. Consulte links em FONTES.md.
+O ensaio parou B: A respondeu nove de dez chamadas, com **um HTTP 504 durante a transição**, e B retornou a `healthy` depois de reiniciada. Explique falha parcial, health checks e recuperação; **não prometa disponibilidade de 100%** e não confunda ALB com Auto Scaling.
 
-## O que foi simplificado
+No WAF, o retorno `/admin` permaneceu 200 imediatamente após o CloudFormation concluir `UPDATE_COMPLETE`, mas passou para 403 após propagação. Confira a Web ACL **associada ao ALB**, `AdminDemo` em **Block**, repita até estabilizar e mantenha `/` respondendo 200. WAF é proteção de aplicação por URI; SG é controle de rede/porta.
 
-- Portal somente leitura; sem autenticação, inscrições, banco ou dados pessoais.
-- Sem Auto Scaling: o ALB distribui tráfego, mas não cria servidores.
-- Duas camadas de infraestrutura: entrada e aplicação. Não há camada de banco.
-- HTTP entre ALB e EC2, HTTPS apenas até ALB.
-- Sem SSH/SSM/NAT: bootstrap vem do UserData e os logs iniciais aparecem no console EC2. Isso é uma escolha para o laboratório, não recomendação universal de operação.
-- SG da aplicação não tem saída geral. Respostas permitidas funcionam por stateful; AmazonProvidedDNS não é filtrado por SG.
-- WAF bloqueia um caminho fictício. Não se afirma proteção completa contra SQL injection, XSS ou todas as ameaças.
-- Stacks separadas recebem IDs por parâmetros, sem exports cruzados. Por isso o aluno deve respeitar a ordem de exclusão mesmo que CloudFormation não impeça todos os erros entre stacks.
-- `CREATE_COMPLETE` não atesta prontidão do portal: validar target group e HTTP é obrigatório.
+## HTTPS público: módulo avançado **condicional e não validado no ensaio**
 
-## Publicar o repositório
+Os templates `03-dns-publico.yaml`, `04-certificado.yaml` e `05-https.yaml` estão no repositório, **mas não fazem parte da trilha principal reproduzida**. Para oferecer a extensão, é indispensável controlar um domínio/subdomínio público real, delegar os NS no DNS autoritativo e obter ACM **ISSUED na mesma conta e região do ALB**. Prepare DNS/ACM previamente por grupo; o endereço `*.elb.amazonaws.com` **não pode ser certificado como se fosse seu domínio**. Sem domínio, registre **não executado** em vez de declarar HTTPS aprovado. Caso opte pelo módulo avançado, use as instruções abaixo e ensaie previamente:
 
-O pacote está pronto para Git, mas **não foi publicado remotamente**. Use um repositório novo vazio, criado na conta/organização correta, com visibilidade escolhida pelo responsável. Não envie credenciais, IDs de acesso temporários, arquivos `.aws/`, chaves ou segredos.
+1. Criar zona pública do subdomínio do grupo via `infra/03-dns-publico.yaml`.
+2. Delegar o subdomínio no DNS pai com os `NameServers` do Output; verificar resolução pública.
+3. Criar `infra/04-certificado.yaml` com `PublicZoneId` e `PortalHostname` e aguardar certificado `ISSUED`.
+4. Criar `infra/05-https.yaml` usando Outputs da base, zona pública e certificado (não confundir `AlbHostedZoneId` com `PublicZoneId`).
+5. Conferir o `HttpsUrl` e listener 443 antes de atualizar a base: `HttpsHost` recebe o hostname para redirecionamento HTTP → HTTPS.
+6. Para limpar esse módulo, remover WAF, listener/alias HTTPS, certificado, CNAME de validação manual residual, delegação/zona pública, DNS privado e **por último** a base. Não apagar registros de terceiros.
 
-Na pasta extraída:
+Sem domínio, **não execute** essas três stacks; deixe `HttpsHost` vazio.
 
-```bash
-git init -b main
-git add .
-git commit -m "Adiciona laboratorio Campus na Nuvem"
-git remote add origin URL_DO_REPOSITORIO_VAZIO
-git push -u origin main
-```
+## Custos, segurança e avaliação
 
-Se Git solicitar identidade, configure com os dados do responsável. Não sobrescreva um repositório existente. Compartilhe com os alunos a URL real e ajuste o exemplo de clone no README. Primeira obtenção é `git clone`; `git pull --ff-only` serve para atualizar uma cópia já clonada.
+O laboratório pode consumir créditos por EC2/EBS, ALB/IPv4, hosted zone e WAF. WAF e zonas podem ter características de cobrança distintas de minutos; valide precificação/quotas para a turma. Não use contas pessoais para contornar falta de crédito/permissão. Não é produção: não há autenticação, banco, Auto Scaling, NAT ou SSH e a aplicação usa servidor Python didático.
 
-## Evolução futura
+Peça que os alunos **comprovem** rotas públicas/privadas, SG para porta 8080, dois targets saudáveis, comportamento durante parada/recuperação, DNS privado e WAF antes/depois, e a limpeza. Os resultados precisam ser da conta de cada grupo. Não publicar chaves, tokens ou capturas com dados de acesso.
 
-Depois do ensaio, registre parâmetros realmente aceitos no Academy e os tempos observados. O material teórico/slides será construído em outra etapa, usando os resultados deste laboratório. O roteiro de vídeo disponível aqui é um apoio para gravar a demonstração prática, não um vídeo já publicado.
+## Atualização do repositório
+
+O repositório já está publicado em `https://github.com/Irandisilvaa/campus-cloud-lab`. A cópia local é obtida por `git clone` ou atualizada via `git pull --ff-only`. Os alunos não precisam compilar o portal; `UserData` embute o código no template base. Mudar arquivos em `app/` exige regenerar `01-base.yaml` e recriar a base (o `git pull` não atualiza EC2 já provisionada).
