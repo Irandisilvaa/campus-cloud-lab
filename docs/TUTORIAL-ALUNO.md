@@ -1,4 +1,4 @@
-# Campus na Nuvem — tutorial reproduzível no AWS Academy (sem domínio)
+# Campus na Nuvem — tutorial reproduzível no AWS Academy
 
 > **Trilha principal validada por execução acompanhada em 08/10/2026:** CloudFormation → VPC/EC2/ALB → falha e recuperação → Route 53 privado → WAF Count/Block → evidências → limpeza. O relato foi fornecido pelo operador do AWS Academy, não por acesso administrativo à conta. DNS público, ACM e HTTPS **não foram executados** por falta de domínio controlado. Os testes de rotas e Security Groups ainda exigem conferência com os comandos abaixo.
 
