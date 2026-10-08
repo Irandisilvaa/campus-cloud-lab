@@ -1,4 +1,4 @@
-# Evidências de laboratório — Campus na Nuvem (sem domínio)
+# Evidências de laboratório — Campus na Nuvem 
 
 **Grupo:** __________  **Integrantes:** __________  **Data:** __________  **Região:** __________  **Prefixo das stacks:** __________
 
