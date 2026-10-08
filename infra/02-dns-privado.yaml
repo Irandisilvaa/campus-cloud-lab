@@ -1,0 +1,39 @@
+# Gerado por scripts/build_templates.py. Fontes da aplicação em app/.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Route 53 privado: app.campus.internal resolve IPs privados das EC2.'
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PrivateIpA:
+    Type: String
+    Description: Output PrivateIpA da base.
+  PrivateIpB:
+    Type: String
+    Description: Output PrivateIpB da base.
+Resources:
+  Zone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: campus.internal
+      VPCs:
+      - VPCId:
+          Ref: VpcId
+        VPCRegion:
+          Ref: AWS::Region
+  Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: Zone
+      Name: app.campus.internal
+      Type: A
+      TTL: '30'
+      ResourceRecords:
+      - Ref: PrivateIpA
+      - Ref: PrivateIpB
+Outputs:
+  PrivateZoneId:
+    Value:
+      Ref: Zone
+  PrivateName:
+    Value: app.campus.internal

@@ -1,0 +1,28 @@
+# Gerado por scripts/build_templates.py. Fontes da aplicação em app/.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Zona publica para subdominio delegado pelo professor; nao registra dominio.
+Parameters:
+  DelegatedDomain:
+    Type: String
+    Description: 'Subdominio REAL sob seu controle, ex: grupo01.lab.seudominio.edu.br, sem ponto final.'
+    AllowedPattern: ^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$
+Resources:
+  Zone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name:
+        Ref: DelegatedDomain
+Outputs:
+  PublicZoneId:
+    Value:
+      Ref: Zone
+  NameServers:
+    Value:
+      Fn::Join:
+      - ', '
+      - Fn::GetAtt:
+        - Zone
+        - NameServers
+  PortalHostname:
+    Value:
+      Fn::Sub: eventos.${DelegatedDomain}

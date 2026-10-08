@@ -1,0 +1,28 @@
+# Gerado por scripts/build_templates.py. Fontes da aplicação em app/.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ACM publico: executar somente depois da delegacao DNS publica.'
+Parameters:
+  PublicZoneId:
+    Type: String
+    Description: ID da zona publica da stack 03, nesta conta.
+  PortalHostname:
+    Type: String
+    Description: Output PortalHostname da stack 03.
+    AllowedPattern: ^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: PortalHostname
+      ValidationMethod: DNS
+      DomainValidationOptions:
+      - DomainName:
+          Ref: PortalHostname
+        HostedZoneId:
+          Ref: PublicZoneId
+      CertificateTransparencyLoggingPreference: ENABLED
+Outputs:
+  CertificateArn:
+    Value:
+      Ref: Certificate

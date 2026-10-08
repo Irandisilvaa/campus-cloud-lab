@@ -1,0 +1,433 @@
+# Gerado por scripts/build_templates.py. Fontes da aplicação em app/.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Campus: VPC, quatro subnets, SGs, duas EC2 privadas e ALB.'
+Parameters:
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI Amazon Linux 2023 STANDARD x86_64 na região do lab; não usar minimal/ARM.
+  InstanceType:
+    Type: String
+    Description: Tipo x86_64 permitido no Academy.
+    Default: t3.micro
+    AllowedValues:
+    - t3.micro
+    - t2.micro
+    - t3.small
+  AvailabilityZoneA:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Primeira AZ da região.
+  AvailabilityZoneB:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Segunda AZ, diferente da primeira.
+  AllowedWebCidr:
+    Type: String
+    Description: IPv4 público da turma/rede em CIDR; 0.0.0.0/0 permite acesso público.
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3}\.){3}\d{1,3}/\d{1,2}
+  HttpsHost:
+    Type: String
+    Description: Deixe vazio inicialmente. Depois de validar HTTPS, informe o hostname certificado para redirecionar
+      HTTP.
+    Default: ''
+    AllowedPattern: ^$|^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$
+Conditions:
+  UseHttps:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: HttpsHost
+      - ''
+Rules:
+  DistinctZones:
+    Assertions:
+    - Assert:
+        Fn::Not:
+        - Fn::Equals:
+          - Ref: AvailabilityZoneA
+          - Ref: AvailabilityZoneB
+      AssertDescription: Selecione duas zonas diferentes.
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-vpc
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties: {}
+  IgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: Vpc
+      InternetGatewayId:
+        Ref: Igw
+  PublicA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone:
+        Ref: AvailabilityZoneA
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-PublicA
+  PublicB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone:
+        Ref: AvailabilityZoneB
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-PublicB
+  PrivateA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone:
+        Ref: AvailabilityZoneA
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-PrivateA
+  PrivateB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: Vpc
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone:
+        Ref: AvailabilityZoneB
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-PrivateB
+  PublicRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: Vpc
+  PrivateRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: Vpc
+  InternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PublicRoutes
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: Igw
+    DependsOn: IgwAttachment
+  PublicAAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicA
+      RouteTableId:
+        Ref: PublicRoutes
+  PublicBAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PublicB
+      RouteTableId:
+        Ref: PublicRoutes
+  PrivateAAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateA
+      RouteTableId:
+        Ref: PrivateRoutes
+  PrivateBAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: PrivateB
+      RouteTableId:
+        Ref: PrivateRoutes
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: Vpc
+      GroupDescription: Entrada HTTP da turma; saida apenas para aplicacao.
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp:
+          Ref: AllowedWebCidr
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        DestinationSecurityGroupId:
+          Ref: AppSg
+  AppSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: Vpc
+      GroupDescription: App privada sem acesso direto da internet.
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 1
+        ToPort: 1
+        CidrIp: 127.0.0.1/32
+        Description: Regra sem destino remoto util para suprimir allow-all padrao.
+  AlbToApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: AppSg
+      SourceSecurityGroupId:
+        Ref: AlbSg
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+  ServerA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: AmiId
+      InstanceType:
+        Ref: InstanceType
+      SubnetId:
+        Ref: PrivateA
+      SecurityGroupIds:
+      - Ref: AppSg
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euo pipefail
+          exec > >(tee /var/log/campus-bootstrap.log /dev/console) 2>&1
+          command -v python3
+          mkdir -p /opt/campus
+          base64 -d <<'CAMPUS_ARCHIVE' | tar -xz -C /opt/campus
+          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
+          CAMPUS_ARCHIVE
+          chmod -R a+rX /opt/campus
+          cat > /etc/systemd/system/campus.service <<'SERVICE'
+          [Unit]
+          Description=Campus Cloud Lab
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          User=nobody
+          Group=nobody
+          WorkingDirectory=/opt/campus
+          Environment=HOST=0.0.0.0
+          Environment=PORT=8080
+          Environment="NODE_NAME=Servidor A"
+          ExecStart=/usr/bin/python3 /opt/campus/server.py
+          Restart=on-failure
+          RestartSec=3
+          NoNewPrivileges=true
+          ProtectSystem=strict
+          ProtectHome=true
+          PrivateTmp=true
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+          systemctl daemon-reload
+          systemctl enable --now campus
+          python3 -c "import urllib.request,time; time.sleep(2); print(urllib.request.urlopen('http://127.0.0.1:8080/health').read())"
+          echo CAMPUS_BOOTSTRAP_OK
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+      - DeviceName: /dev/xvda
+        Ebs:
+          VolumeSize: 8
+          VolumeType: gp3
+          Encrypted: true
+          DeleteOnTermination: true
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-servidor-A
+  ServerB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: AmiId
+      InstanceType:
+        Ref: InstanceType
+      SubnetId:
+        Ref: PrivateB
+      SecurityGroupIds:
+      - Ref: AppSg
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euo pipefail
+          exec > >(tee /var/log/campus-bootstrap.log /dev/console) 2>&1
+          command -v python3
+          mkdir -p /opt/campus
+          base64 -d <<'CAMPUS_ARCHIVE' | tar -xz -C /opt/campus
+          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
+          CAMPUS_ARCHIVE
+          chmod -R a+rX /opt/campus
+          cat > /etc/systemd/system/campus.service <<'SERVICE'
+          [Unit]
+          Description=Campus Cloud Lab
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          User=nobody
+          Group=nobody
+          WorkingDirectory=/opt/campus
+          Environment=HOST=0.0.0.0
+          Environment=PORT=8080
+          Environment="NODE_NAME=Servidor B"
+          ExecStart=/usr/bin/python3 /opt/campus/server.py
+          Restart=on-failure
+          RestartSec=3
+          NoNewPrivileges=true
+          ProtectSystem=strict
+          ProtectHome=true
+          PrivateTmp=true
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+          systemctl daemon-reload
+          systemctl enable --now campus
+          python3 -c "import urllib.request,time; time.sleep(2); print(urllib.request.urlopen('http://127.0.0.1:8080/health').read())"
+          echo CAMPUS_BOOTSTRAP_OK
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+      - DeviceName: /dev/xvda
+        Ebs:
+          VolumeSize: 8
+          VolumeType: gp3
+          Encrypted: true
+          DeleteOnTermination: true
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-servidor-B
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      Subnets:
+      - Ref: PublicA
+      - Ref: PublicB
+      SecurityGroups:
+      - Ref: AlbSg
+    DependsOn:
+    - InternetRoute
+    - PublicAAssociation
+    - PublicBAssociation
+  Targets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: Vpc
+      Protocol: HTTP
+      Port: 8080
+      TargetType: instance
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '10'
+      - Key: stickiness.enabled
+        Value: 'false'
+      Targets:
+      - Id:
+          Ref: ServerA
+      - Id:
+          Ref: ServerB
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: Alb
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        Fn::If:
+        - UseHttps
+        - - Type: redirect
+            RedirectConfig:
+              Protocol: HTTPS
+              Port: '443'
+              Host:
+                Ref: HttpsHost
+              StatusCode: HTTP_301
+        - - Type: forward
+            TargetGroupArn:
+              Ref: Targets
+Outputs:
+  VpcId:
+    Value:
+      Ref: Vpc
+  AlbArn:
+    Value:
+      Ref: Alb
+  AlbDnsName:
+    Value:
+      Fn::GetAtt:
+      - Alb
+      - DNSName
+  AlbHostedZoneId:
+    Value:
+      Fn::GetAtt:
+      - Alb
+      - CanonicalHostedZoneID
+  AlbSecurityGroupId:
+    Value:
+      Ref: AlbSg
+  TargetGroupArn:
+    Value:
+      Ref: Targets
+  HttpUrl:
+    Value:
+      Fn::Sub: http://${Alb.DNSName}
+  ServerAId:
+    Value:
+      Ref: ServerA
+  ServerBId:
+    Value:
+      Ref: ServerB
+  PrivateIpA:
+    Value:
+      Fn::GetAtt:
+      - ServerA
+      - PrivateIp
+  PrivateIpB:
+    Value:
+      Fn::GetAtt:
+      - ServerB
+      - PrivateIp

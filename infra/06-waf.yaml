@@ -1,0 +1,68 @@
+# Gerado por scripts/build_templates.py. Fontes da aplicação em app/.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WAF regional: demonstracao deterministica de bloqueio do prefixo /admin.'
+Parameters:
+  AlbArn:
+    Type: String
+    Description: ARN do ALB, na mesma regiao da Web ACL.
+  RuleMode:
+    Type: String
+    Description: Comece Count; atualize para Block para comparar.
+    Default: Count
+    AllowedValues:
+    - Count
+    - Block
+Conditions:
+  BlockMode:
+    Fn::Equals:
+    - Ref: RuleMode
+    - Block
+Resources:
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        SampledRequestsEnabled: true
+        MetricName: CampusWebAcl
+      Rules:
+      - Name: AdminDemo
+        Priority: 0
+        Action:
+          Fn::If:
+          - BlockMode
+          - Block: {}
+          - Count: {}
+        Statement:
+          ByteMatchStatement:
+            FieldToMatch:
+              UriPath: {}
+            PositionalConstraint: STARTS_WITH
+            SearchString: /admin
+            TextTransformations:
+            - Priority: 0
+              Type: URL_DECODE
+            - Priority: 1
+              Type: LOWERCASE
+        VisibilityConfig:
+          CloudWatchMetricsEnabled: true
+          SampledRequestsEnabled: true
+          MetricName: CampusAdminDemo
+  Association:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn:
+        Ref: AlbArn
+      WebACLArn:
+        Fn::GetAtt:
+        - WebAcl
+        - Arn
+Outputs:
+  WebAclArn:
+    Value:
+      Fn::GetAtt:
+      - WebAcl
+      - Arn

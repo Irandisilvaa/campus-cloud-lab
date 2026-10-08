@@ -1,0 +1,76 @@
+# Gerado por scripts/build_templates.py. Fontes da aplicação em app/.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Listener HTTPS e registro A Alias para ALB.
+Parameters:
+  AlbArn:
+    Type: String
+    Description: Output da stack base.
+  AlbDnsName:
+    Type: String
+    Description: Output da stack base.
+  AlbHostedZoneId:
+    Type: String
+    Description: CanonicalHostedZoneID do ALB (nao confundir com a zona do dominio).
+  AlbSecurityGroupId:
+    Type: String
+    Description: Output da base.
+  TargetGroupArn:
+    Type: String
+    Description: Output da base.
+  PublicZoneId:
+    Type: String
+    Description: ID da zona publica da stack 03.
+  PortalHostname:
+    Type: String
+    Description: Hostname usado no certificado.
+  CertificateArn:
+    Type: String
+    Description: Certificado ISSUED nesta conta e regiao.
+  AllowedWebCidr:
+    Type: String
+    Description: Mesmo CIDR utilizado na base.
+    Default: 0.0.0.0/0
+Resources:
+  HttpsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: AlbSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp:
+        Ref: AllowedWebCidr
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: AlbArn
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+      - CertificateArn:
+          Ref: CertificateArn
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: TargetGroupArn
+  Alias:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId:
+        Ref: PublicZoneId
+      Name:
+        Ref: PortalHostname
+      Type: A
+      AliasTarget:
+        DNSName:
+          Ref: AlbDnsName
+        HostedZoneId:
+          Ref: AlbHostedZoneId
+        EvaluateTargetHealth: false
+Outputs:
+  HttpsUrl:
+    Value:
+      Fn::Sub: https://${PortalHostname}
